@@ -1,0 +1,4 @@
+outputs/
+__pycache__/
+dataset2026/
+*.pyc
