@@ -1,4 +1,8 @@
-outputs/
+outputs/*
+!outputs/predictions.jsonl
+!outputs/submission.zip
+!outputs/raw_*.json
+dataset2026
 __pycache__/
 dataset2026/
 *.pyc
