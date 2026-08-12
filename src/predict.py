@@ -296,33 +296,53 @@ class HF:
         return self._two_way(prompts, "A", "B", batch)
 
     def seq_logprob(self, pairs, batch=4):
-        """Summed logprob of continuation given prefix (teacher-forced)."""
+        """Summed logprob of continuation given prefix (teacher-forced).
+
+        The float32 full-vocab logits of a batch are the peak allocation of
+        the whole pipeline ([batch, seq, 202k] floats). On a sharded 2x32GB
+        split the head GPU has little headroom left, so on out-of-memory the
+        batch halves and the chunk retries rather than killing the stage."""
         torch = self.torch
         out = []
-        for i in range(0, len(pairs), batch):
+        i = 0
+        while i < len(pairs):
             chunk = pairs[i:i + batch]
-            rows, clens = [], []
-            for pre, cont in chunk:
-                pi = self.tok.encode(pre)
-                ci = self.tok.encode(cont, add_special_tokens=False)
-                rows.append(pi + ci)
-                clens.append(len(ci))
-            maxlen = max(len(x) for x in rows)
-            pad = self.tok.pad_token_id
-            inp = torch.tensor([[pad] * (maxlen - len(x)) + x for x in rows],
-                               device=self.model.device)
-            att = torch.tensor([[0] * (maxlen - len(x)) + [1] * len(x)
-                                for x in rows], device=self.model.device)
-            with torch.no_grad():
-                logits = self.model(input_ids=inp, attention_mask=att).logits.float()
-            lp = torch.log_softmax(logits, dim=-1)
-            for j, (ids, cl) in enumerate(zip(rows, clens)):
-                nfull = len(ids)
-                s = 0.0
-                for k in range(nfull - cl, nfull):
-                    pos = maxlen - nfull + k
-                    s += float(lp[j, pos - 1, ids[k]])
-                out.append(s)
+            try:
+                out.extend(self._seq_logprob_chunk(chunk))
+            except torch.OutOfMemoryError:
+                if batch == 1:
+                    raise
+                batch = max(1, batch // 2)
+                torch.cuda.empty_cache()
+                continue
+            i += len(chunk)
+        return out
+
+    def _seq_logprob_chunk(self, chunk):
+        torch = self.torch
+        out = []
+        rows, clens = [], []
+        for pre, cont in chunk:
+            pi = self.tok.encode(pre)
+            ci = self.tok.encode(cont, add_special_tokens=False)
+            rows.append(pi + ci)
+            clens.append(len(ci))
+        maxlen = max(len(x) for x in rows)
+        pad = self.tok.pad_token_id
+        inp = torch.tensor([[pad] * (maxlen - len(x)) + x for x in rows],
+                           device=self.model.device)
+        att = torch.tensor([[0] * (maxlen - len(x)) + [1] * len(x)
+                            for x in rows], device=self.model.device)
+        with torch.no_grad():
+            logits = self.model(input_ids=inp, attention_mask=att).logits.float()
+        lp = torch.log_softmax(logits, dim=-1)
+        for j, (ids, cl) in enumerate(zip(rows, clens)):
+            nfull = len(ids)
+            s = 0.0
+            for k in range(nfull - cl, nfull):
+                pos = maxlen - nfull + k
+                s += float(lp[j, pos - 1, ids[k]])
+            out.append(s)
         return out
 
 
