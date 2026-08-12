@@ -61,10 +61,14 @@ bash scripts/run_inference.sh    # elicit -> probe -> fuse, outputs/predictions.
 bash scripts/make_zip.sh         # outputs/submission.zip
 ```
 
+`outputs/` ships the checkpoints behind the official score, and every stage
+resumes from existing checkpoints, so the commands above rebuild the scored
+predictions without touching a GPU. For a from-scratch reproduction, delete
+`outputs/raw_*.json` first.
+
 The sampling and probe stages are the bulk of the compute — channels for all
 six relations plus roughly 26k border probes and 6k exchange probes, several
-hours on one A100 80GB. Each relation checkpoints to `outputs/` and every
-stage resumes from checkpoints if interrupted. `build_submission.py` is
+hours on one A100 80GB. `build_submission.py` is
 CPU-only and deterministic given the checkpoints.
 
 To evaluate on validation, set `MUSE_SPLIT=val` for the elicitation stages,
