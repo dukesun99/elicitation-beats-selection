@@ -101,11 +101,25 @@ def ckpt(name, obj=None):
     print(f"  [ckpt] {name}", flush=True)
 
 
+# Sampling-budget multiplier. Default 1 reproduces the released
+# configuration exactly. Raising it draws more samples per channel, which
+# shrinks the variance of the frequency and cluster-mass estimates the frozen
+# thresholds are applied to - a from-scratch re-elicitation at K_SCALE=1
+# lands within a couple of macro-F1 points of the reported score, and most of
+# that spread is rows sitting near a threshold. Channels with k=1 are greedy
+# (temperature 0) and are never scaled.
+K_SCALE = float(os.environ.get("AKBC_K_SCALE", "1"))
+
+
+def scale_k(k):
+    return max(1, round(k * K_SCALE)) if k > 1 else 1
+
+
 def stage_sample(hf):
     """Direct + recitation channels for the four sampled relations."""
-    plan = [("hasCapacity", 6, 1024), ("hasArea", 6, 1024),
-            ("personHasCityOfDeath", 6, 1024),
-            ("companyTradesAtStockExchange", 6, 1024)]
+    plan = [("hasCapacity", scale_k(6), 1024), ("hasArea", scale_k(6), 1024),
+            ("personHasCityOfDeath", scale_k(6), 1024),
+            ("companyTradesAtStockExchange", scale_k(6), 1024)]
     for rel, k, mt in plan:
         if ckpt(f"raw_{rel}") is not None:
             print(f"[{rel}] cached", flush=True)

@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import predict as P
-from muse_elicit import Muse, OUT, TEST, subjects, ckpt
+from muse_elicit import scale_k, K_SCALE, Muse, OUT, TEST, subjects, ckpt
 
 
 # ------------------- auxiliary elicitation channels -------------------
@@ -52,6 +52,7 @@ def stage_channels(hf):
         ss = subjects(rel)
         pools = defaultdict(list)
         for label, mk, k, mt in chans:
+            k = scale_k(k)
             print(f"[chan:{rel}:{label}] n={len(ss)} k={k}", flush=True)
             temp = 1.0 if k > 1 else 0.0
             outs = hf.sample(hf.chat([mk(s) for s in ss], "low", answer_now=True),
@@ -160,11 +161,11 @@ def stage_borders_freq(hf):
     ss = subjects(rel)
     print(f"[borders_freq] n={len(ss)}", flush=True)
     outs = []
-    for seed in (13, 29):
+    for seed in ((13, 29) if K_SCALE < 1.5 else (13, 29, 51, 83)):
         outs.append(hf.sample(
             hf.chat([P.build_prompt(rel, s, seed=seed) for s in ss],
                     "low", answer_now=True),
-            3, 320, 1.0, batch=8, stop_q=False))
+            scale_k(3), 320, 1.0, batch=8, stop_q=False))
     freq = {}
     for i, s in enumerate(ss):
         cnt, sf, nn = Counter(), defaultdict(Counter), 0

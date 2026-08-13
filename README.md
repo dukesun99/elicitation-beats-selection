@@ -78,6 +78,20 @@ then score with the official evaluator:
 python3 dataset2026/evaluate.py -p outputs/predictions.jsonl -g dataset2026/data/val.jsonl
 ```
 
+## Sampling budget
+
+Every channel samples at temperature 1, so a from-scratch re-elicitation
+draws different pools than the released checkpoints, and rows whose cluster
+mass or frequency sits near a frozen threshold can flip either way. Set
+`AKBC_K_SCALE` to draw more samples per channel and shrink that variance:
+
+```bash
+AKBC_K_SCALE=2 bash scripts/run_inference.sh   # 2x samples, ~2x GPU time
+```
+
+The default of 1 reproduces the released configuration exactly. Greedy
+(temperature 0) channels are never scaled.
+
 ## Reproducibility
 
 Sampling channels use temperature sampling, so regenerated predictions are not
