@@ -63,8 +63,14 @@ bash scripts/make_zip.sh         # outputs/submission.zip
 
 `outputs/` ships the checkpoints behind the official score, and every stage
 resumes from existing checkpoints, so the commands above rebuild the scored
-predictions without touching a GPU. For a from-scratch reproduction, delete
-`outputs/raw_*.json` first.
+predictions without touching a GPU.
+
+For a genuine from-scratch re-elicitation use `scripts/fresh_run.sh`, which
+writes to an output root outside the repo. Do not simply delete
+`outputs/raw_*.json` and re-run in place: those files are tracked, so any
+later `git pull`, `git stash`, or `git checkout` restores them mid-run, after
+which every stage logs `cached` and the build re-emits the original
+predictions — a run that looks reproduced but did no work.
 
 The sampling and probe stages are the bulk of the compute — channels for all
 six relations plus roughly 26k border probes and 6k exchange probes, several
