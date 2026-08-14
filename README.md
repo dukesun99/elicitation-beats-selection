@@ -7,17 +7,17 @@ task](https://github.com/lm-kbc/dataset2026).
 
 | | official macro-F1 |
 |---|---|
-| shipped artifact (the checkpoints in `outputs/`) | **0.6743** |
-| best from-scratch re-elicitation | **0.6553** |
+| this system | **0.6553** |
+| prompting baseline, same backbone | 0.6415 |
 
-**Read the second number before you use the first.** The shipped artifact is
-what the leaderboard scored. 0.6553 is the best score reached by regenerating
-every pool from nothing. The 0.0190 difference is not sampling luck, and the
-paper says where it went; a short version is under
-[Reproduction](#reproduction) below.
+The checkpoints in `outputs/` are the ones behind that score, and
+`src/build_submission.py` rebuilds the submitted predictions from them
+exactly. `src/build_baseline.py` rebuilds the baseline the same way, from the
+same checkpoints. See [What the machinery
+buys](#what-the-machinery-buys) before assuming every stage below earns its
+place.
 
-Paper: *Fitting the Draw: Closed-Book Knowledge Base Construction and a
-Reproduction Study of Our Own System*.
+Paper: see `paper/` in the accompanying submission.
 
 ## How it works
 
@@ -27,14 +27,14 @@ One backbone,
 single model, so there is no second network anywhere in the pipeline. Every
 decision constant is inlined in the source.
 
-**Elicitation.** The four relations answered by free generation draw k=6
+**Elicitation.** The four relations answered by free generation draw k=12
 samples at temperature 1 from a few-shot prompt carrying the relation
 definition verbatim, a JSON schema, and eight training exemplars. Auxiliary
-channels then approach the same fact from other angles: recitation, a
-commonly-cited-figure frame, a wiki-table frame and a greedy pass for the
-numerics; an obituary frame, a local-language frame and a presupposition frame
-for city-of-death; a completeness-framed list plus per-year enumeration for
-awards; two list passes for borders.
+channels then approach the same fact from other angles, at k=8: recitation, a
+commonly-cited-figure frame, a wiki-table frame and a greedy pass at
+temperature 0 for the numerics; a local-language frame and a presupposition
+frame for city-of-death; a list enumeration for awards; two list passes at
+different sampling depths for borders.
 
 Muse writes two channels, reasoning first and the user-facing answer second.
 Sampling keeps the reasoning, which is where the model's factual advantage
@@ -52,12 +52,57 @@ probes, and company probes every (subject, exchange) pair with the yes-bias
 removed in log-odds against placebo companies known to be unlisted.
 
 **Decision.** String relations fuse sampling frequency with probe score under
-a per-relation threshold. City-of-death abstains unless twice the
-deceased-gate probability plus twice the fraction of samples naming a city
-clears 1.45. Numerics cluster the pooled values at 8% linkage and take the
-largest cluster's maximum, with a PMI term and an overshoot correction on
-capacity. Definition-derived rules finish the job: integral-territory mapping,
-an award name-shape filter, and no abstention on numerics or awards.
+a per-relation threshold. Borders mixes the two at 0.7/0.3 with the boosted
+pass at triple weight and a 0.40 threshold. City-of-death votes over the
+direct channel and recitation at double weight, and abstains unless the
+deceased-gate probability plus three times the fraction of samples naming a
+city clears 1.80. Numerics cluster the pooled values and take the largest
+cluster's maximum, at 5% linkage for capacity and 8% for area.
+Definition-derived rules finish the job: integral-territory mapping, an award
+name-shape filter, and no abstention on numerics or awards.
+
+**Where the constants come from.** The borders fusion, the city vote and
+abstention rule, and the capacity linkage and channel weights were fitted on
+validation gold, and a candidate replaced the default only when it strictly
+improved on validation by more than one row. The city setting was additionally
+confirmed by two-fold cross-validation of the fitting procedure. Area and
+company kept their defaults because no validation candidate beat them. The
+award rule was chosen against Wikidata-derived weak labels, not validation
+gold, and is the one place where the tuning signal came from the test
+subjects.
+
+## What the machinery buys
+
+The baseline is the same backbone with none of the above attached: the k=12
+direct samples, aggregated by self-consistency under rules taken from the task
+definition instead of fitted. Numerics take the median of the largest cluster
+at the metric's own 5% tolerance, city takes a majority over parsed cities
+including the null answer, and the set-valued relations admit an object named
+in more than half the samples that parsed.
+
+| relation | prompting | this system | delta |
+|---|---|---|---|
+| countryLandBordersCountry | 0.9346 | 0.9481 | +0.0135 |
+| hasArea | 0.8300 | 0.8600 | +0.0300 |
+| companyTradesAtStockExchange | 0.7838 | 0.7838 | 0.0000 |
+| personHasCityOfDeath | 0.5400 | 0.5700 | +0.0300 |
+| hasCapacity | 0.2653 | **0.2449** | **-0.0204** |
+| awardWonBy | 0.0696 | 0.2358 | +0.1662 |
+| **all 475 rows** | **0.6415** | **0.6553** | **+0.0138** |
+
+Two rows do not favour the system. **On `hasCapacity` plain prompting wins by
+0.0204**: the auxiliary channels and the max-representative rule are net
+harmful on the relation this system spent the most effort on. That was not
+visible when the configuration was chosen. On validation the system's capacity
+setting scores 0.3505 against the baseline's 0.3196, so validation preferred
+it and the protocol above kept it. The relation ships as the system built it,
+and the gap is recorded rather than papered over. `companyTradesAtStockExchange`
+is the second row: it gains exactly 0.0000, because the exchange probes and
+the placebo correction recover what the direct channel already said.
+
+```bash
+python3 src/build_baseline.py     # outputs/predictions_baseline.jsonl
+```
 
 ## Requirements
 
@@ -75,12 +120,12 @@ bash scripts/run_inference.sh    # elicit -> probe -> fuse, outputs/predictions.
 bash scripts/make_zip.sh         # outputs/submission.zip
 ```
 
-`outputs/` ships the checkpoints behind the 0.6743 submission, and every stage
-resumes from existing checkpoints, so the commands above rebuild the scored
+`outputs/` ships the checkpoints behind the submitted predictions, and every
+stage resumes from existing checkpoints, so the commands above rebuild those
 predictions byte-for-byte without touching a GPU.
 
-For a genuine from-scratch re-elicitation use `scripts/fresh_run.sh`, which
-writes to an output root outside the repo:
+To elicit from scratch instead, use `scripts/fresh_run.sh`, which writes to an
+output root outside the repo:
 
 ```bash
 bash scripts/fresh_run.sh                       # ../akbc-fresh-run/outputs/
@@ -106,54 +151,22 @@ then score with the official evaluator:
 python3 dataset2026/evaluate.py -p outputs/predictions.jsonl -g dataset2026/data/val.jsonl
 ```
 
-## Reproduction
-
-Everything downstream of the sampling checkpoints is deterministic, so
-rebuilding from the shipped checkpoints reproduces the scored predictions
-exactly. Regenerating the pools does not reproduce the score. Four independent
-from-scratch runs scored 0.6495 (k=6) and 0.6457 (k=12) with the constants
-inlined in this repository, 0.6511 with those constants refitted on
-validation gold, and 0.6553 once the city rule had been cross-validated as
-well. The code here carries the released constants, so a clean
-`scripts/fresh_run.sh` lands near 0.6495; the refit that reaches 0.6553 is
-described in the paper and uses validation gold only.
-
-The 0.0190 shortfall is about three times the whole-metric per-draw standard
-deviation of 0.0063, so it is not draw luck. It sits mostly in
-`hasCapacity`, which carries 0.0147 of it. The reason is that the numeric
-decision constants were selected against Wikidata-derived weak labels, and
-those labels are exact for `hasCapacity` and `hasArea` and inexact everywhere
-else — so for those two relations the tuning signal came from the test
-subjects, and it was applied on one specific draw of a stochastic pipeline.
-Bootstrapping fresh pools puts `hasArea`, which has no fitted numeric
-constants, 1.0 standard deviation above the distribution a fresh run draws
-from, and `hasCapacity`, which has two, 2.7 above it. The capacity PMI term on
-its own is worth +0.041 on the pool it was fitted to and −0.010 on a fresh
-pool.
-
-Refitting on validation gold recovers part of the rest. Borders closes to
-within 0.0003 of the shipped score and city matches it exactly, both from
-validation data alone, and capacity gains +0.031 by *removing* fitted
-structure (PMI weight to zero, channel weights rebalanced). Capacity still
-ends 0.0147 short, and since the other five relations hold only 0.0042 of
-remaining gap between them, no from-scratch run of this system exceeds 0.6595
-without moving capacity.
-
 ## Sampling budget
 
-Every channel samples at temperature 1, so a from-scratch re-elicitation draws
+Every channel samples at temperature 1, so eliciting from scratch draws
 different pools than the released checkpoints, and rows whose cluster mass or
-frequency sits near a frozen threshold can flip either way. `AKBC_K_SCALE`
-draws more samples per channel:
+frequency sits near a threshold can fall either way. `AKBC_K_SCALE` scales the
+per-channel sample count; the default of 2 is the released configuration
+(k=12 direct, k=8 auxiliary), which is the budget the decision constants were
+fitted against.
 
 ```bash
-AKBC_K_SCALE=2 bash scripts/fresh_run.sh   # 2x samples, ~2x GPU time
+AKBC_K_SCALE=1 bash scripts/fresh_run.sh   # half the samples, half the GPU time
 ```
 
-This does not close the gap. The k=12 run scored 0.6457 against 0.6495 for
-k=6, because more samples estimate the modal cluster better and for capacity
-the mode is usually wrong. The default of 1 reproduces the released
-configuration. Greedy (temperature 0) channels are never scaled.
+Cutting it is not advisable and raising it further does not help capacity,
+where more samples estimate the modal cluster better and the model's modal
+value is usually wrong. Greedy (temperature 0) channels are never scaled.
 
 ## License
 

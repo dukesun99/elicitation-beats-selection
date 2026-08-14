@@ -101,14 +101,13 @@ def ckpt(name, obj=None):
     print(f"  [ckpt] {name}", flush=True)
 
 
-# Sampling-budget multiplier. Default 1 reproduces the released
-# configuration exactly. Raising it draws more samples per channel, which
-# shrinks the variance of the frequency and cluster-mass estimates the frozen
-# thresholds are applied to - a from-scratch re-elicitation at K_SCALE=1
-# lands within a couple of macro-F1 points of the reported score, and most of
-# that spread is rows sitting near a threshold. Channels with k=1 are greedy
+# Sampling-budget multiplier applied to every temperature-1 channel. The
+# default of 2 is the released configuration: the shipped checkpoints were
+# drawn at k=12 direct and k=8 auxiliary, and the decision constants were
+# fitted against pools of that size, so a smaller budget applies thresholds
+# to mass estimates they were not fitted for. Channels with k=1 are greedy
 # (temperature 0) and are never scaled.
-K_SCALE = float(os.environ.get("AKBC_K_SCALE", "1"))
+K_SCALE = float(os.environ.get("AKBC_K_SCALE", "2"))
 
 
 def scale_k(k):

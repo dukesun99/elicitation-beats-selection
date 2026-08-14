@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Build the submission from the elicitation checkpoints in outputs/.
 
-Configuration per relation (from the Muse sweeps; the numerics are tuned
-against weak GT, which is exact for hasArea/hasCapacity, so for those two
-that is tuning against truth rather than against a proxy):
-  borders   freq(.9) + probe(.1), tau .35, boosted-pass weight 2,
-            territory mapping
-  city      channels direct/ml/presup(x2)/recite; val-fitted abstention
-            2*gate + 2*non-null-fraction >= 1.45
-  company   lambda .6, tau .6, placebo-corrected exchange probes
-  capacity  all channels, 8% linkage, highest rep, PMI .5, overshoot .95
-  area      direct + greedy + wiki(x2), 8% linkage, highest rep
-  award     first pass only, count >= 1 with name-shape filter
+Configuration per relation. Constants marked [val] were fitted on validation
+gold and adopted only where a challenger strictly beat the incumbent by more
+than one row; [def] constants are read off the relation definition; the award
+setting came from Wikidata-derived weak labels and is marked [weak].
+  borders   freq(.7) + probe(.3), tau .40, boosted-pass weight 3,
+            territory mapping [val]
+  city      channels direct + recite(x2), ml and presup dropped; abstention
+            1*gate + 3*non-null-fraction >= 1.80 [val, cross-validated]
+  company   lambda .6, tau .6, placebo-corrected exchange probes [val]
+  capacity  5% linkage, highest rep, no PMI term, no overshoot,
+            channel weights cited/greedy/wiki x2 [val]
+  area      direct + greedy + wiki(x2), 8% linkage, highest rep [val]
+  award     first pass only, count >= 1 with name-shape filter [weak]
 """
 import json, math, os, re, sys
 from collections import Counter, defaultdict
@@ -66,7 +68,7 @@ freq = json.load(open(f"{MD}/raw_borders_freq.json"))
 if os.path.exists(f"{MD}/raw_borders_freq2.json"):      # boosted second pass
     # the boosted pass is the larger and more reliable one (3 seeds x k=4 vs
     # 2 x k=3), so it carries twice the weight in the merge
-    W2 = 2.0
+    W2 = 3.0
     f2 = json.load(open(f"{MD}/raw_borders_freq2.json"))
     for s, d in f2.items():
         base = freq.setdefault(s, {})
@@ -91,8 +93,8 @@ for s in subs_of(rel):
     for ck in set(fr) | set(pair.get(s, {})):
         f = fr.get(ck, 0.0)
         pr = pair.get(s, {}).get(ck)
-        sig = 0.9 * f + 0.1 * pr if pr is not None else f
-        if sig >= 0.35:
+        sig = 0.7 * f + 0.3 * pr if pr is not None else f
+        if sig >= 0.40:
             picked.append((sig, sfm.get(ck, su.get(ck, ck))))
     picked.sort(key=lambda x: -x[0])
     mp, seen = [], set()
@@ -108,7 +110,7 @@ rel = "personHasCityOfDeath"
 direct = json.load(open(f"{MD}/raw_{rel}.json"))
 chan = json.load(open(f"{MD}/raw_chan_{rel}.json"))
 gates = json.load(open(f"{MD}/raw_gates.json"))["city"]
-CW = {"direct": 1, "ml": 1, "presup": 2, "recite": 1}
+CW = {"direct": 1, "ml": 0, "presup": 0, "recite": 2}
 for s in subs_of(rel):
     samp = []
     for t in direct.get(s, []):
@@ -136,7 +138,7 @@ for s in subs_of(rel):
             for c in nonnull:
                 sfm[P.norm(c)][c.strip()] += 1
             top, _tc = cnt.most_common(1)[0]
-            if 2.0 * pd + 2.0 * (len(nonnull) / n) >= 1.45:
+            if 1.0 * pd + 3.0 * (len(nonnull) / n) >= 1.80:
                 ans = [sfm[top].most_common(1)[0][0]]
     out[(s, rel)] = ans
 
@@ -179,8 +181,8 @@ for i, s in enumerate(subs):
 
 # ------------------------------- numerics -------------------------------
 for rel, chw, tol, wp, shrink, fallback in (
-        ("hasCapacity", {"cited": 1, "direct": 1, "greedy": 1, "recite": 1, "wiki": 1},
-         0.08, 0.5, 0.95, "20000"),
+        ("hasCapacity", {"cited": 2, "direct": 1, "greedy": 2, "recite": 1, "wiki": 2},
+         0.05, 0.0, 1.0, "20000"),
         ("hasArea", {"direct": 1, "disambig": 0, "greedy": 1, "recite": 0, "wiki": 2},
          0.08, 0.0, 1.0, "100")):
     direct = json.load(open(f"{MD}/raw_{rel}.json"))
